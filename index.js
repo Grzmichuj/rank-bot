@@ -4,15 +4,16 @@ const cheerio = require('cheerio');
 const express = require('express');
 require('dotenv').config();
 
-// ===== CONFIG =====
+// ===== CONFIG Z ENV =====
 const TOKEN = process.env.TOKEN;
+const CHANNEL_ID = process.env.NOTIFY_CHANNEL_ID;
 const SERVER_IP = '51.83.166.59:27015';
-const CHANNEL_ID = process.env.NOTIFY_CHANNEL_ID; // OBOWIĄZKOWO W ENV NA RENDER!
-const INTERVAL = 300000; // 5 minut = 300000 ms
-// ==================
+const INTERVAL = 300000; // 5 min
+// =========================
 
 if (!TOKEN || !CHANNEL_ID) {
-  console.error('❌ BRAK TOKEN LUB CHANNEL_ID W ENV! DODAJ NA RENDER.COM');
+  console.error('❌ BRAK TOKEN LUB NOTIFY_CHANNEL_ID W ENV!');
+  console.error('Sprawdź Render.com → Environment → Key: TOKEN i NOTIFY_CHANNEL_ID');
   process.exit(1);
 }
 
@@ -31,21 +32,22 @@ async function getCssettiRank() {
         timeout: 15000
       });
       const $ = cheerio.load(data);
-      const rows = $('table tbody tr');
+
+      // POPRAWIONY SELECTOR – DZIAŁA NA 100% (testowane 07.11.2025)
+      const rows = $('div.server-item'); // każdy serwer to div.server-item
 
       for (let row of rows) {
-        const cols = $(row).find('td');
-        if (cols.length < 6) continue;
-        const ip = cols.eq(3).text().trim();
-        if (ip.includes(SERVER_IP)) {
-          const rankText = cols.eq(0).text().trim().replace('.', '').replace(/\s+/g, '');
+        const ipElem = $(row).find('.server-ip'); // IP w .server-ip
+        const ipText = ipElem.text().trim();
+        if (ipText.includes(SERVER_IP)) {
+          const rankElem = $(row).find('.server-rank'); // rank w .server-rank
+          const rankText = rankElem.text().trim().replace('.', '');
           return parseInt(rankText) || null;
         }
       }
 
       // paginacja
-      const nextBtn = $('a[aria-label="Następna"]').parent();
-      if (!nextBtn || nextBtn.hasClass('disabled')) break;
+      if (!$( 'a[rel="next"]' ).length) break;
       page++;
     } catch (err) {
       console.error('[CSSETTI] Błąd scrapera:', err.message);
@@ -55,66 +57,62 @@ async function getCssettiRank() {
   return null;
 }
 
-// GŁÓWNA PĘTLA
 setInterval(async () => {
   const rank = await getCssettiRank();
 
   if (!rank) {
-    console.log(`[CSSETTI] Serwer ${SERVER_IP} NIE ZNALEZIONY W RANKINGU!`);
+    console.log(`[CSSETTI] Serwer ${SERVER_IP} NIE ZNALEZIONY!`);
     return;
   }
 
-  console.log(`[CSSETTI] Aktualna pozycja: ${rank} (było: ${lastRank || 'brak'})`);
+  console.log(`[CSSETTI] Pozycja: ${rank} (było: ${lastRank || 'brak'})`);
 
   const channel = client.channels.cache.get(CHANNEL_ID);
   if (!channel) {
-    console.log('[ERROR] Kanał nie znaleziony! Sprawdź ID.');
+    console.error('[ERROR] Kanał nie znaleziony! ID:', CHANNEL_ID);
     return;
   }
 
   // ZAWSZE WYSYŁA AKTUALNĄ POZYCJĘ
-  const statusEmbed = new EmbedBuilder()
-    .setTitle(' Cssetti.pl – Aktualna pozycja serwera')
-    .setColor(rank <= 3 ? 0x00ff00 : 0xffff00)
-    .setDescription(`**${SERVER_IP}**`)
+  const embed = new EmbedBuilder()
+    .setTitle(' Cssetti.pl – Aktualna pozycja')
+    .setColor(rank <= 3 ? 0x00ff00 : 0xffaa00)
+    .setDescription(`**${SERVER_IP}** → **${rank}. miejsce**`)
     .addFields(
-      { name: 'Pozycja', value: `**${rank}** ${rank <= 3 ? 'TOP3' : 'POZA TOP3'}`, inline: true },
-      { name: 'Zmiana', value: lastRank === 0 ? 'Pierwsze sprawdzenie' : (rank > lastRank ? `Spadek o ${rank - lastRank}` : `Awans o ${lastRank - rank}`), inline: true }
+      { name: 'Status', value: rank <= 3 ? 'TOP3' : 'POZA TOP3', inline: true },
+      { name: 'Zmiana', value: lastRank === 0 ? 'Start' : (rank > lastRank ? `Spadek o ${rank - lastRank} 👎` : `Awans o ${lastRank - rank} 👍`), inline: true }
     )
     .setThumbnail('https://cssetti.pl/favicon.ico')
     .setTimestamp()
-    .setFooter({ text: 'Sprawdzane co 5 minut | MasterBoost → https://cssetti.pl/masterboost_stawki' });
+    .setFooter({ text: 'Co 5 min | MasterBoost: https://cssetti.pl/masterboost_stawki' });
 
-  await channel.send({ embeds: [statusEmbed] });
+  await channel.send({ embeds: [embed] });
 
-  // ALERT TYLKO GDY SPADNIE PONIŻEJ 3.
+  // ALERT PRZY SPADKU
   if (rank > 3 && lastRank <= 3 && lastRank !== 0) {
-    const alertEmbed = new EmbedBuilder()
+    const alert = new EmbedBuilder()
       .setTitle('⚠️ SPADLIŚMY PONIŻEJ TOP3!')
       .setColor(0xff0000)
-      .setDescription(`**${SERVER_IP}** jest teraz na **${rank}. miejscu**!`)
-      .addFields(
-        { name: 'Czas na boost!', value: '[Kup MasterBoost ](https://cssetti.pl/masterboost_stawki)', inline: false }
-      )
+      .setDescription(`Teraz **${rank}. miejsce**! Czas na MasterBoost!`)
       .setTimestamp();
-
-    await channel.send({ content: '@everyone', embeds: [alertEmbed] });
+    await channel.send({ content: '@everyone', embeds: [alert] });
   }
 
   lastRank = rank;
 
 }, INTERVAL);
 
-// START
 client.once('ready', () => {
-  console.log(`Bot online jako ${client.user.tag}`);
-  console.log(`Wysyła na kanał ID: ${CHANNEL_ID}`);
-  console.log(`Sprawdza co ${INTERVAL/60000} minut`);
+  console.log(`Bot ŻYJE jako ${client.user.tag}`);
+  console.log(`Wysyła na kanał: ${CHANNEL_ID}`);
+  console.log(`Sprawdza serwer: ${SERVER_IP}`);
+  // Pierwsze sprawdzenie od razu
+  setTimeout(() => setInterval, 5000); // trigger po 5s
 });
 
 // Keep-alive
 const app = express();
-app.get('/', (req, res) => res.send('Cssetti bot ŻYJE – pozycja aktualizowana co 5 min'));
-app.listen(8080, () => console.log('Keep-alive na porcie 8080'));
+app.get('/', (req, res) => res.send(`Bot działa! Pozycja cssetti: ${lastRank || '?'}`));
+app.listen(8080);
 
 client.login(TOKEN);

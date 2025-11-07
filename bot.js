@@ -25,19 +25,19 @@ const PREVIOUS_STATUS_MESSAGE_ID = process.env.PREVIOUS_STATUS_MESSAGE_ID;
 let statusMessage = null;
 let lastRank = 0;
 
-// DEFINICJA CLIENTA NA POCZĄTKU – TERAZ JUŻ DZIAŁA!
+// DEFINICJA CLIENTA NA POCZĄTKU
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
-// POPRAWIONY SCAPER – TABLE TR TD (działa na pozycji 2!)
+// POPRAWIONY SCAPER POZYCJI
 async function getMasterBoostRank() {
     const fullIp = `${SERVER_IP}:${SERVER_PORT}`;
     let page = 1;
     while (page <= 10) {
         try {
             console.log(`[MASTERBOOST] Sprawdzam stronę ${page}...`);
-            const { data } = await axios.get(`https://cssetti.pl/masterboost_stawki?Page=${page}`, {
+            const { data } = await axios.get(`https://cssetti.pl/lista?Page=${page}`, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
                 timeout: 15000
             });
@@ -51,7 +51,7 @@ async function getMasterBoostRank() {
                 if (cols.length < 4) continue;
 
                 const rankText = cols.eq(0).text().trim().replace('.', '');
-                const ipText = cols.eq(2).text().trim();  // IP jest w 3. kolumnie!
+                const ipText = cols.eq(2).text().trim();  // IP w 3. kolumnie
 
                 if (ipText.includes(fullIp)) {
                     const rank = parseInt(rankText);
@@ -73,7 +73,43 @@ async function getMasterBoostRank() {
     return null;
 }
 
-// Aktualizacja embedu – ZAWSZE pokazuje pozycję
+// NOWY SCAPER STAWKI REKLAMY – ODCZYTUJE DYNAMICZNIE Z STRONY DLA TWOJEJ POZYCJI
+async function getStawkaReklamy(rank) {
+    if (!rank) return 'brak';
+    try {
+        console.log(`[STAWKA] Scrapuję stawkę dla pozycji ${rank}...`);
+        const { data } = await axios.get('https://cssetti.pl/masterboost_stawki', {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+            timeout: 15000
+        });
+        const $ = cheerio.load(data);
+
+        const rows = $('table tbody tr');
+        console.log(`[DEBUG] Znaleziono ${rows.length} wierszy stawek`);
+
+        for (let i = 0; i < rows.length; i++) {
+            const cols = rows.eq(i).find('td');
+            if (cols.length < 2) continue;
+
+            const posText = cols.eq(0).text().trim();
+            const price = cols.eq(1).text().trim();
+
+            // Jeśli pozycja pasuje dokładnie (np. "1" == rank 1)
+            if (parseInt(posText) === rank) {
+                console.log(`[STAWKA] Znaleziono dla ${rank}: ${price}`);
+                return price;
+            }
+        }
+
+        console.log(`[STAWKA] Nie znaleziono stawki dla pozycji ${rank}`);
+        return 'POZA TABLICĄ';
+    } catch (err) {
+        console.error('[STAWKA] Błąd scrapera:', err.message);
+        return 'błąd';
+    }
+}
+
+// Aktualizacja embedu – ODCZYTUJE STAWKĘ DYNAMICZNIE
 async function updateMasterBoostStatus() {
     if (!statusMessage) {
         console.error('statusMessage nie istnieje!');
@@ -81,46 +117,42 @@ async function updateMasterBoostStatus() {
     }
 
     const rank = await getMasterBoostRank();
+    const stawka = await getStawkaReklamy(rank);
     const fullIp = `${SERVER_IP}:${SERVER_PORT}`;
-    const timePL = new Date().toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Europe/Warsaw' });
+    const now = new Date();
+    const timePL = now.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Europe/Warsaw' });
+    const datePL = now.toLocaleDateString('pl-PL', { day: 'numeric', month: 'numeric', year: 'numeric' });
 
     const embed = new EmbedBuilder()
-        .setTitle(' MasterBoost – Aktualna pozycja w rankingu')
-        .setURL('https://cssetti.pl/masterboost_stawki')
+        .setColor(rank <= 3 ? 0x00FF00 : 0xFFAA00)
+        .setTitle(`MasterBoost - Aktualna pozycja w rankingu [${fullIp}]`)
         .setThumbnail('https://cssetti.pl/favicon.ico')
         .setTimestamp()
-        .setFooter({ text: `Co ${UPDATE_INTERVAL_MINUTES} min | ${new Date().toLocaleDateString('pl-PL')}` });
+        .setFooter({ text: `@MCk199\n${datePL} Dziś o ${timePL}` });
 
     if (!rank) {
-        embed.setColor(0xFF0000)
-             .setDescription(`**${fullIp}**\n\n Serwer NIE ZNALEZIONY w rankingu cssetti.pl`)
-             .addFields({ name: 'Aktualizacja', value: timePL });
+        embed.setDescription(`
+**Stawka Reklamy:** brak | **Pozycja:** ❌ NIE ZNALEZIONY
+
+**Aktualizacja:** ${timePL}
+        `);
     } else {
-        const color = rank <= 3 ? 0x00FF00 : (rank <= 10 ? 0xFFFF00 : 0xFFAA00);
-        const status = rank <= 3 ? 'TOP3' : (rank <= 10 ? 'TOP10' : 'POZA TOP10');
-        const zmiana = lastRank === 0 ? 'Pierwsze sprawdzenie' : (rank > lastRank ? `Spadek o ${rank - lastRank} ` : `Awans o ${lastRank - rank} `);
+        embed.setDescription(`
+**Stawka Reklamy:** ${stawka} | **Pozycja:** **${rank}. miejsce**
 
-        embed.setColor(color)
-             .setDescription(`**${fullIp}**`)
-             .addFields(
-                 { name: 'Pozycja', value: `**${rank}. miejsce** ${status}`, inline: true },
-                 { name: 'Zmiana', value: zmiana, inline: true },
-                 { name: 'Boost', value: '[Kup MasterBoost ](https://cssetti.pl/masterboost_stawki)', inline: false },
-                 { name: 'Aktualizacja', value: timePL, inline: false }
-             );
-
-        lastRank = rank;
+**Aktualizacja:** ${timePL}
+        `);
     }
 
     try {
         await statusMessage.edit({ embeds: [embed], content: '' });
-        console.log(`Embed zaktualizowany – pozycja: ${rank || 'NIE ZNALEZIONY'}`);
+        console.log(`Embed zaktualizowany – pozycja: ${rank || 'NIE'}, stawka: ${stawka}`);
     } catch (err) {
         console.error('Błąd edycji:', err);
     }
 }
 
-// READY – client już zdefiniowany wyżej!
+// READY – bez zmian
 client.once('ready', async () => {
     console.log(`Bot ŻYJE jako ${client.user.tag} `);
 

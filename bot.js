@@ -21,6 +21,7 @@ const SERVER_PORT = parseInt(process.env.CS16_SERVER_PORT, 10);
 const STATUS_CHANNEL_ID = process.env.STATUS_CHANNEL_ID;
 const UPDATE_INTERVAL_MINUTES = parseInt(process.env.UPDATE_INTERVAL_MINUTES || '3', 10);
 const PREVIOUS_STATUS_MESSAGE_ID = process.env.PREVIOUS_STATUS_MESSAGE_ID;
+const USER_ID = process.env.USER_ID;  // Dodaj w Environment Variables na Render: USER_ID = 123456789012345678 (Twój Discord ID dla @mention)
 
 let statusMessage = null;
 let lastRank = 0;
@@ -30,7 +31,7 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
-// POPRAWIONY SCAPER POZYCJI – TABLE TR TD (działa na pozycji 1!)
+// SCAPER POZYCJI – bez zmian (działa, Twój serwer jest na 1.)
 async function getMasterBoostRank() {
     const fullIp = `${SERVER_IP}:${SERVER_PORT}`;
     let page = 1;
@@ -73,7 +74,7 @@ async function getMasterBoostRank() {
     return null;
 }
 
-// POPRAWIONY SCAPER STAWKI – DYNAMICZNIE ODCZYTUJE SUMARYCZNĄ STAWKĘ DLA POZYCJI (POMIJA HEADER, CZYTA KOLUMNĘ 1)
+// POPRAWIONY SCAPER STAWKI – OBSŁUGUJE ZAKRESY JAK "1-3", BIERZE SUMARYCZNĄ STAWKĘ DLA DOKŁADNEJ POZYCJI
 async function getStawkaReklamy(rank) {
     if (!rank) return 'brak';
     try {
@@ -84,8 +85,8 @@ async function getStawkaReklamy(rank) {
         });
         const $ = cheerio.load(data);
 
-        const rows = $('table tbody tr').slice(1); // POMIJA HEADER!
-        console.log(`[DEBUG] Znaleziono ${rows.length} wierszy stawek (po pominięciu headera)`);
+        const rows = $('table tbody tr');
+        console.log(`[DEBUG] Znaleziono ${rows.length} wierszy stawek`);
 
         for (let i = 0; i < rows.length; i++) {
             const cols = rows.eq(i).find('td');
@@ -96,8 +97,15 @@ async function getStawkaReklamy(rank) {
 
             console.log(`[DEBUG] Wiersz ${i}: pozycja="${posText}", stawka="${price}"`);
 
-            if (parseInt(posText) === rank) {
-                console.log(`[STAWKA] Znaleziono dla ${rank}: ${price}`);
+            if (posText.includes('-')) {
+                const [start, end] = posText.split('-').map(Number);
+                if (rank >= start && rank <= end) {
+                    // Dla zakresów bierzemy pierwszą wartość (sumaryczną stawkę dla pozycji start)
+                    console.log(`[STAWKA] Pasuje zakres ${posText}: ${price}`);
+                    return price;
+                }
+            } else if (parseInt(posText) === rank) {
+                console.log(`[STAWKA] Dokładne dopasowanie ${posText}: ${price}`);
                 return price;
             }
         }
@@ -110,7 +118,7 @@ async function getStawkaReklamy(rank) {
     }
 }
 
-// Aktualizacja – ZWYKŁA TEKSTOWA WIADOMOŚĆ, STAWKA SUMARYCZNA DYNAMICZNIE, FOOTER BEZ GODZINY
+// Aktualizacja – ZWYKŁA TEKSTOWA WIADOMOŚĆ, STAWKA SUMARYCZNA, MENTION @MCk199 JAKO <@ID>
 async function updateMasterBoostStatus() {
     if (!statusMessage) {
         console.error('statusMessage nie istnieje!');
@@ -124,10 +132,10 @@ async function updateMasterBoostStatus() {
     const timePL = now.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Europe/Warsaw' });
     const datePL = now.toLocaleDateString('pl-PL', { day: 'numeric', month: 'numeric', year: 'numeric' });
 
-    const messageText = `MasterBoost - Aktualna pozycja w rankingu [${fullIp}]\n\nStawka Reklamy: ${stawka} | Pozycja: ${rank ? rank + '. miejsce' : 'NIE ZNALEZIONY'}\n\nAktualizacja: ${timePL}\n\n@MCk199 ${datePL}`;
+    const messageText = `MasterBoost - Aktualna pozycja w rankingu [${fullIp}]\n\nStawka Reklamy: ${stawka} | Pozycja: ${rank ? rank + '. miejsce' : 'NIE ZNALEZIONY'}\n\nAktualizacja: ${timePL}\n\n<@${USER_ID}> ${datePL}`;
 
     try {
-        await statusMessage.edit({ content: messageText, embeds: [] }); // ZWYKŁA WIADOMOŚĆ, BEZ EMBEDA
+        await statusMessage.edit({ content: messageText, embeds: [] });
         console.log(`Wiadomość zaktualizowana – pozycja: ${rank || 'NIE'}, stawka: ${stawka}`);
     } catch (err) {
         console.error('Błąd edycji:', err);

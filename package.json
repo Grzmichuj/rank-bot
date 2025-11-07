@@ -1,0 +1,24 @@
+{
+  "name": "cs16-player-count-discord-bot",
+  "version": "1.0.0",
+  "description": "A Discord bot to display CS 1.6 server player count in its status.",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "cs1.6",
+    "gamedig",
+    "player-count",
+    "status"
+  ],
+  "author": "TwojeImię (opcjonalne)",
+  "license": "ISC",
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.5",
+    "gamedig": "^0.2.2"
+  }
+}

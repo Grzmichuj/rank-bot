@@ -30,7 +30,7 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
-// POPRAWIONY SCAPER POZYCJI
+// POPRAWIONY SCAPER POZYCJI – TABLE TR TD (działa na pozycji 1!)
 async function getMasterBoostRank() {
     const fullIp = `${SERVER_IP}:${SERVER_PORT}`;
     let page = 1;
@@ -73,7 +73,7 @@ async function getMasterBoostRank() {
     return null;
 }
 
-// NOWY SCAPER STAWKI REKLAMY – ODCZYTUJE DYNAMICZNIE Z STRONY DLA TWOJEJ POZYCJI
+// POPRAWIONY SCAPER STAWKI – DYNAMICZNIE ODCZYTUJE SUMARYCZNĄ STAWKĘ DLA POZYCJI (POMIJA HEADER, CZYTA KOLUMNĘ 1)
 async function getStawkaReklamy(rank) {
     if (!rank) return 'brak';
     try {
@@ -84,8 +84,8 @@ async function getStawkaReklamy(rank) {
         });
         const $ = cheerio.load(data);
 
-        const rows = $('table tbody tr');
-        console.log(`[DEBUG] Znaleziono ${rows.length} wierszy stawek`);
+        const rows = $('table tbody tr').slice(1); // POMIJA HEADER!
+        console.log(`[DEBUG] Znaleziono ${rows.length} wierszy stawek (po pominięciu headera)`);
 
         for (let i = 0; i < rows.length; i++) {
             const cols = rows.eq(i).find('td');
@@ -94,7 +94,8 @@ async function getStawkaReklamy(rank) {
             const posText = cols.eq(0).text().trim();
             const price = cols.eq(1).text().trim();
 
-            // Jeśli pozycja pasuje dokładnie (np. "1" == rank 1)
+            console.log(`[DEBUG] Wiersz ${i}: pozycja="${posText}", stawka="${price}"`);
+
             if (parseInt(posText) === rank) {
                 console.log(`[STAWKA] Znaleziono dla ${rank}: ${price}`);
                 return price;
@@ -109,7 +110,7 @@ async function getStawkaReklamy(rank) {
     }
 }
 
-// Aktualizacja embedu – ODCZYTUJE STAWKĘ DYNAMICZNIE
+// Aktualizacja – ZWYKŁA TEKSTOWA WIADOMOŚĆ, STAWKA SUMARYCZNA DYNAMICZNIE, FOOTER BEZ GODZINY
 async function updateMasterBoostStatus() {
     if (!statusMessage) {
         console.error('statusMessage nie istnieje!');
@@ -123,30 +124,11 @@ async function updateMasterBoostStatus() {
     const timePL = now.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Europe/Warsaw' });
     const datePL = now.toLocaleDateString('pl-PL', { day: 'numeric', month: 'numeric', year: 'numeric' });
 
-    const embed = new EmbedBuilder()
-        .setColor(rank <= 3 ? 0x00FF00 : 0xFFAA00)
-        .setTitle(`MasterBoost - Aktualna pozycja w rankingu [${fullIp}]`)
-        .setThumbnail('https://cssetti.pl/favicon.ico')
-        .setTimestamp()
-        .setFooter({ text: `@MCk199\n${datePL} Dziś o ${timePL}` });
-
-    if (!rank) {
-        embed.setDescription(`
-**Stawka Reklamy:** brak | **Pozycja:** ❌ NIE ZNALEZIONY
-
-**Aktualizacja:** ${timePL}
-        `);
-    } else {
-        embed.setDescription(`
-**Stawka Reklamy:** ${stawka} | **Pozycja:** **${rank}. miejsce**
-
-**Aktualizacja:** ${timePL}
-        `);
-    }
+    const messageText = `MasterBoost - Aktualna pozycja w rankingu [${fullIp}]\n\nStawka Reklamy: ${stawka} | Pozycja: ${rank ? rank + '. miejsce' : 'NIE ZNALEZIONY'}\n\nAktualizacja: ${timePL}\n\n@MCk199 ${datePL}`;
 
     try {
-        await statusMessage.edit({ embeds: [embed], content: '' });
-        console.log(`Embed zaktualizowany – pozycja: ${rank || 'NIE'}, stawka: ${stawka}`);
+        await statusMessage.edit({ content: messageText, embeds: [] }); // ZWYKŁA WIADOMOŚĆ, BEZ EMBEDA
+        console.log(`Wiadomość zaktualizowana – pozycja: ${rank || 'NIE'}, stawka: ${stawka}`);
     } catch (err) {
         console.error('Błąd edycji:', err);
     }
@@ -172,10 +154,10 @@ client.once('ready', async () => {
                 statusMessage = await channel.messages.fetch(PREVIOUS_STATUS_MESSAGE_ID);
                 console.log('Załadano starą wiadomość');
             } catch {
-                statusMessage = await channel.send({ embeds: [new EmbedBuilder().setDescription('Inicjuję...').setColor(0xFFA500)] });
+                statusMessage = await channel.send('Inicjuję MasterBoost...');
             }
         } else {
-            statusMessage = await channel.send({ embeds: [new EmbedBuilder().setDescription('Inicjuję MasterBoost...').setColor(0xFFA500)] });
+            statusMessage = await channel.send('Inicjuję MasterBoost...');
         }
 
         await updateMasterBoostStatus();

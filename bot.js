@@ -14,7 +14,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 require('dotenv').config();
 
-// Zmienne środowiskowe (bez zmian)
+// Zmienne środowiskowe
 const TOKEN = process.env.DISCORD_TOKEN;
 const SERVER_IP = process.env.CS16_SERVER_IP;
 const SERVER_PORT = parseInt(process.env.CS16_SERVER_PORT, 10);
@@ -25,7 +25,12 @@ const PREVIOUS_STATUS_MESSAGE_ID = process.env.PREVIOUS_STATUS_MESSAGE_ID;
 let statusMessage = null;
 let lastRank = 0;
 
-// Scraper pozycji MasterBoost – DZIAŁA NA 100% (07.11.2025)
+// Inicjalizacja klienta Discorda (TO BYŁO BRAK!)
+const client = new Client({
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
+});
+
+// Scraper pozycji MasterBoost
 async function getMasterBoostRank() {
     const fullIp = `${SERVER_IP}:${SERVER_PORT}`;
     let page = 1;
@@ -56,7 +61,7 @@ async function getMasterBoostRank() {
     return null;
 }
 
-// Aktualizacja – ZAWSZE POKAZUJE POZYCJĘ (bez warunków)
+// Aktualizacja – ZAWSZE pokazuje pozycję
 async function updateMasterBoostStatus() {
     if (!statusMessage) return;
 
@@ -106,7 +111,7 @@ async function updateMasterBoostStatus() {
     }
 }
 
-// Ready – dokładnie jak miałeś
+// Ready
 client.once('ready', async () => {
     console.log(`✅ Bot zalogowany jako ${client.user.tag}`);
 
@@ -115,7 +120,7 @@ client.once('ready', async () => {
         process.exit(1);
     }
 
-    // Keep-alive HTTP (bez zmian)
+    // Keep-alive HTTP
     http.createServer((req, res) => res.end('OK')).listen(process.env.PORT || 3000);
 
     const channel = await client.channels.fetch(STATUS_CHANNEL_ID);

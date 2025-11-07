@@ -96,7 +96,7 @@ async function updateStatus() {
         .setURL('https://cssetti.pl/lista')
         .setThumbnail('https://cssetti.pl/favicon.ico')
         .setTimestamp()
-        .setFooter({ text: `Co ${UPDATE_INTERVAL_MINUTES} min | ${new Date().toLocaleDateString('pl-PL')}` });
+        .setFooter({ text: `${new Date().toLocaleDateString('pl-PL')}` });
 
     if (!rank) {
         embed.setColor(0xFF0000)

@@ -1,7 +1,5 @@
-// Bezpieczne obsługi nieprzechwyconych wyjątków
-process.on('unhandledRejection', err => {
-    console.error('❌ UNHANDLED REJECTION:', err);
-});
+// Bezpieczne obsługi wyjątków
+process.on('unhandledRejection', err => console.error('❌ UNHANDLED REJECTION:', err));
 process.on('uncaughtException', err => {
     console.error('❌ UNCAUGHT EXCEPTION:', err);
     process.exit(1);
@@ -9,32 +7,31 @@ process.on('uncaughtException', err => {
 
 // Importy
 const http = require('http');
-const { Client, GatewayIntentBits, TextChannel, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, TextChannel, EmbedBuilder } = require('discord.com');
 const axios = require('axios');
 const cheerio = require('cheerio');
 require('dotenv').config();
 
-// Zmienne środowiskowe
+// === STAŁE – JUŻ NIE MUSISZ NIC USTAWIAC W .ENV ===
 const TOKEN = process.env.DISCORD_TOKEN;
-const SERVER_IP = process.env.CS16_SERVER_IP;
-const SERVER_PORT = parseInt(process.env.CS16_SERVER_PORT, 10);
 const STATUS_CHANNEL_ID = process.env.STATUS_CHANNEL_ID;
 const UPDATE_INTERVAL_MINUTES = parseInt(process.env.UPDATE_INTERVAL_MINUTES || '3', 10);
-const PREVIOUS_STATUS_MESSAGE_ID = process.env.PREVIOUS_STATUS_MESSAGE_ID;
+
+// IP i port na sztywno – tylko ten serwer będzie sprawdzany
+const SERVER_IP = '51.83.166.59';
+const SERVER_PORT = 27015;
+const FULL_IP = `${SERVER_IP}:${SERVER_PORT}`;
 
 let statusMessage = null;
-let lastRank = 0;
 
-// DEFINICJA CLIENTA NA POCZĄTKU – TERAZ JUŻ DZIAŁA!
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
-// POPRAWIONY SCAPER – TABLE TR TD (działa na pozycji 2!)
-async function getMasterBoostRank() {
-    const fullIp = `${SERVER_IP}:${SERVER_PORT}`;
+// ================== SCRAPER – SZUKA TYLKO NASZEGO SERWERA ==================
+async function getOurRank() {
     let page = 1;
-    while (page <= 10) {
+    while (page <= 20) { // sprawdzamy max 20 strony (do ~1000 pozycji)
         try {
             console.log(`[MASTERBOOST] Sprawdzam stronę ${page}...`);
             const { data } = await axios.get(`https://cssetti.pl/lista?Page=${page}`, {
@@ -42,50 +39,56 @@ async function getMasterBoostRank() {
                 timeout: 15000
             });
             const $ = cheerio.load(data);
-
             const rows = $('table tbody tr');
-            console.log(`[DEBUG] Znaleziono ${rows.length} serwerów na stronie ${page}`);
 
             for (let i = 0; i < rows.length; i++) {
                 const cols = rows.eq(i).find('td');
                 if (cols.length < 4) continue;
 
                 const rankText = cols.eq(0).text().trim().replace('.', '');
-                const ipText = cols.eq(2).text().trim();  // IP jest w 3. kolumnie!
+                const ipText = cols.eq(2).text().trim();
 
-                if (ipText.includes(fullIp)) {
-                    const rank = parseInt(rankText);
-                    console.log(`[MASTERBOOST] ZNALEZIONO NA POZYCJI ${rank}! IP: ${ipText}`);
+                if (ipText.includes(FULL_IP)) {
+                    const rank = parseInt(rankText, 10);
+                    console.log(`[MASTERBOOST] ZNALEZIONO! Pozycja: ${rank} | IP: ${ipText}`);
                     return rank;
                 }
             }
 
-            // paginacja
-            const nextPage = $('a[aria-label="Następna"], a[rel="next"]');
-            if (!nextPage.length || nextPage.parent().hasClass('disabled')) break;
+            // czy jest kolejna strona?
+            const nextBtn = $('a[aria-label="Następna"], a[rel="next"]');
+            if (!nextBtn.length || nextBtn.parent().hasClass('disabled')) {
+                console.log('[MASTERBOOST] To już ostatnia strona.');
+                break;
+            }
             page++;
         } catch (err) {
-            console.error('[MASTERBOOST] Błąd:', err.message);
+            console.error('[MASTERBOOST] Błąd na stronie ${page}:', err.message);
             break;
         }
     }
-    console.log('[MASTERBOOST] SERWER NIE ZNALEZIONY PO 10 STRONACH');
+    console.log('[MASTERBOOST] SERWER NIE ZNALEZIONY W CAŁYM RANKINGU');
     return null;
 }
 
-// Aktualizacja embedu – ZAWSZE pokazuje pozycję
-async function updateMasterBoostStatus() {
+// ================== AKTUALIZACJA EMBEDU ==================
+async function updateStatus() {
     if (!statusMessage) {
         console.error('statusMessage nie istnieje!');
         return;
     }
 
-    const rank = await getMasterBoostRank();
-    const fullIp = `${SERVER_IP}:${SERVER_PORT}`;
-    const timePL = new Date().toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Europe/Warsaw' });
+    const rank = await getOurRank();
+    const timePL = new Date().toLocaleTimeString('pl-PL', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+        timeZone: 'Europe/Warsaw'
+    });
 
     const embed = new EmbedBuilder()
-        .setTitle(' MasterBoost – Aktualna pozycja w rankingu')
+        .setTitle(' MasterBoost – Aktualna pozycja')
         .setURL('https://cssetti.pl/masterboost_stawki')
         .setThumbnail('https://cssetti.pl/favicon.ico')
         .setTimestamp()
@@ -93,61 +96,54 @@ async function updateMasterBoostStatus() {
 
     if (!rank) {
         embed.setColor(0xFF0000)
-             .setDescription(`**${fullIp}**\n\n Serwer NIE ZNALEZIONY w rankingu cssetti.pl`)
-             .addFields({ name: 'Aktualizacja', value: timePL });
+             .setDescription(`**${FULL_IP}**\n\n Serwer NIE ZNALEZIONY w rankingu cssetti.pl`);
     } else {
         const color = rank <= 3 ? 0x00FF00 : (rank <= 10 ? 0xFFFF00 : 0xFFAA00);
         const status = rank <= 3 ? 'TOP3' : (rank <= 10 ? 'TOP10' : 'POZA TOP10');
-        const zmiana = lastRank === 0 ? 'Pierwsze sprawdzenie' : (rank > lastRank ? `Spadek o ${rank - lastRank} ` : `Awans o ${lastRank - rank} `);
 
         embed.setColor(color)
-             .setDescription(`**${fullIp}**`)
+             .setDescription(`**${FULL_IP}**`)
              .addFields(
                  { name: 'Pozycja', value: `**${rank}. miejsce** ${status}`, inline: true },
-                 { name: 'Zmiana', value: zmiana, inline: true },
-                 { name: 'Boost', value: '[Kup MasterBoost ](https://cssetti.pl/masterboost_stawki)', inline: false },
+                 { name: 'Boost', value: '[Kup MasterBoost](https://cssetti.pl/masterboost_stawki)', inline: false },
                  { name: 'Aktualizacja', value: timePL, inline: false }
              );
-
-        lastRank = rank;
     }
 
     try {
         await statusMessage.edit({ embeds: [embed], content: '' });
         console.log(`Embed zaktualizowany – pozycja: ${rank || 'NIE ZNALEZIONY'}`);
     } catch (err) {
-        console.error('Błąd edycji:', err);
+        console.error('Błąd edycji wiadomości:', err);
     }
 }
 
-// READY – client już zdefiniowany wyżej!
+// ================== START BOTA ==================
 client.once('ready', async () => {
-    console.log(`Bot ŻYJE jako ${client.user.tag} `);
+    console.log(`Bot żyje jako ${client.user.tag}`);
 
-    if (!TOKEN || !SERVER_IP || isNaN(SERVER_PORT) || !STATUS_CHANNEL_ID) {
-        console.error('BRAKUJE ZMIENNYCH ŚRODOWISKOWYCH!');
+    if (!TOKEN || !STATUS_CHANNEL_ID) {
+        console.error('BRAK DISCORD_TOKEN lub STATUS_CHANNEL_ID w .env!');
         process.exit(1);
     }
 
+    // keep-alive dla Heroku/Render
     http.createServer((req, res) => res.end('OK')).listen(process.env.PORT || 3000);
 
     try {
         const channel = await client.channels.fetch(STATUS_CHANNEL_ID);
-        if (!channel || !(channel instanceof TextChannel)) throw new Error('Błędne ID kanału');
+        if (!(channel instanceof TextChannel)) throw new Error('Kanał nie jest tekstowy');
 
-        if (PREVIOUS_STATUS_MESSAGE_ID) {
-            try {
-                statusMessage = await channel.messages.fetch(PREVIOUS_STATUS_MESSAGE_ID);
-                console.log('Załadano starą wiadomość');
-            } catch {
-                statusMessage = await channel.send({ embeds: [new EmbedBuilder().setDescription('Inicjuję...').setColor(0xFFA500)] });
-            }
-        } else {
-            statusMessage = await channel.send({ embeds: [new EmbedBuilder().setDescription('Inicjuję MasterBoost...').setColor(0xFFA500)] });
-        }
+        // zawsze nowa wiadomość przy (re)starcie
+        statusMessage = await channel.send({
+            embeds: [new EmbedBuilder()
+                .setDescription('Inicjuję MasterBoost...')
+                .setColor(0xFFA500)]
+        });
+        console.log('Wysłano nową wiadomość statusu');
 
-        await updateMasterBoostStatus();
-        setInterval(updateMasterBoostStatus, UPDATE_INTERVAL_MINUTES * 60000);
+        await updateStatus();
+        setInterval(updateStatus, UPDATE_INTERVAL_MINUTES * 60_000);
         console.log(`Interwał co ${UPDATE_INTERVAL_MINUTES} min włączony`);
     } catch (err) {
         console.error('Błąd startu:', err);

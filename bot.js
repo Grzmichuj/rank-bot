@@ -1,7 +1,5 @@
-// Bezpieczne obsługi nieprzechwyconych wyjątków
-process.on('unhandledRejection', err => {
-    console.error('❌ UNHANDLED REJECTION:', err);
-});
+// Bezpieczne obsługi wyjątków
+process.on('unhandledRejection', err => console.error('❌ UNHANDLED REJECTION:', err));
 process.on('uncaughtException', err => {
     console.error('❌ UNCAUGHT EXCEPTION:', err);
     process.exit(1);
@@ -9,7 +7,7 @@ process.on('uncaughtException', err => {
 
 // Importy
 const http = require('http');
-const { Client, GatewayIntentBits, TextChannel, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits } = require('discord.js');
 const axios = require('axios');
 const cheerio = require('cheerio');
 require('dotenv').config();
@@ -21,23 +19,21 @@ const SERVER_PORT = parseInt(process.env.CS16_SERVER_PORT, 10);
 const STATUS_CHANNEL_ID = process.env.STATUS_CHANNEL_ID;
 const UPDATE_INTERVAL_MINUTES = parseInt(process.env.UPDATE_INTERVAL_MINUTES || '3', 10);
 const PREVIOUS_STATUS_MESSAGE_ID = process.env.PREVIOUS_STATUS_MESSAGE_ID;
-const USER_ID = process.env.USER_ID;  // Dodaj w Environment Variables na Render: USER_ID = 123456789012345678 (Twój Discord ID dla @mention)
 
 let statusMessage = null;
-let lastRank = 0;
 
-// DEFINICJA CLIENTA NA POCZĄTKU
+// Client
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
-// SCAPER POZYCJI – bez zmian (działa, Twój serwer jest na 1.)
-async function getMasterBoostRank() {
+// SCAPER TYLKO TWOJEGO SERWERA ZOMBIE+EXP
+async function getMyServerRank() {
     const fullIp = `${SERVER_IP}:${SERVER_PORT}`;
     let page = 1;
     while (page <= 10) {
         try {
-            console.log(`[MASTERBOOST] Sprawdzam stronę ${page}...`);
+            console.log(`[ZOMBIE+EXP] Sprawdzam stronę ${page}...`);
             const { data } = await axios.get(`https://cssetti.pl/lista?Page=${page}`, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
                 timeout: 15000
@@ -52,102 +48,53 @@ async function getMasterBoostRank() {
                 if (cols.length < 4) continue;
 
                 const rankText = cols.eq(0).text().trim().replace('.', '');
-                const ipText = cols.eq(2).text().trim();  // IP w 3. kolumnie
+                const ipText = cols.eq(2).text().trim();
 
                 if (ipText.includes(fullIp)) {
                     const rank = parseInt(rankText);
-                    console.log(`[MASTERBOOST] ZNALEZIONO NA POZYCJI ${rank}! IP: ${ipText}`);
+                    console.log(`[ZOMBIE+EXP] TWÓJ SERWER NA POZYCJI ${rank}! IP: ${ipText}`);
                     return rank;
                 }
             }
 
-            // paginacja
             const nextPage = $('a[aria-label="Następna"], a[rel="next"]');
             if (!nextPage.length || nextPage.parent().hasClass('disabled')) break;
             page++;
         } catch (err) {
-            console.error('[MASTERBOOST] Błąd:', err.message);
+            console.error('[ZOMBIE+EXP] Błąd:', err.message);
             break;
         }
     }
-    console.log('[MASTERBOOST] SERWER NIE ZNALEZIONY PO 10 STRONACH');
+    console.log('[ZOMBIE+EXP] TWÓJ SERWER NIE ZNALEZIONY');
     return null;
 }
 
-// POPRAWIONY SCAPER STAWKI – OBSŁUGUJE ZAKRESY JAK "1-3", BIERZE SUMARYCZNĄ STAWKĘ DLA DOKŁADNEJ POZYCJI
-async function getStawkaReklamy(rank) {
-    if (!rank) return 'brak';
-    try {
-        console.log(`[STAWKA] Scrapuję stawkę dla pozycji ${rank}...`);
-        const { data } = await axios.get('https://cssetti.pl/masterboost_stawki', {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-            timeout: 15000
-        });
-        const $ = cheerio.load(data);
+// Aktualizacja – TYLKO POZYCJA TWOJEGO SERWERA, ZWYKŁA WIADOMOŚĆ
+async function updateStatus() {
+    if (!statusMessage) return;
 
-        const rows = $('table tbody tr');
-        console.log(`[DEBUG] Znaleziono ${rows.length} wierszy stawek`);
-
-        for (let i = 0; i < rows.length; i++) {
-            const cols = rows.eq(i).find('td');
-            if (cols.length < 2) continue;
-
-            const posText = cols.eq(0).text().trim();
-            const price = cols.eq(1).text().trim();
-
-            console.log(`[DEBUG] Wiersz ${i}: pozycja="${posText}", stawka="${price}"`);
-
-            if (posText.includes('-')) {
-                const [start, end] = posText.split('-').map(Number);
-                if (rank >= start && rank <= end) {
-                    // Dla zakresów bierzemy pierwszą wartość (sumaryczną stawkę dla pozycji start)
-                    console.log(`[STAWKA] Pasuje zakres ${posText}: ${price}`);
-                    return price;
-                }
-            } else if (parseInt(posText) === rank) {
-                console.log(`[STAWKA] Dokładne dopasowanie ${posText}: ${price}`);
-                return price;
-            }
-        }
-
-        console.log(`[STAWKA] Nie znaleziono stawki dla pozycji ${rank}`);
-        return 'POZA TABLICĄ';
-    } catch (err) {
-        console.error('[STAWKA] Błąd scrapera:', err.message);
-        return 'błąd';
-    }
-}
-
-// Aktualizacja – ZWYKŁA TEKSTOWA WIADOMOŚĆ, STAWKA SUMARYCZNA, MENTION @MCk199 JAKO <@ID>
-async function updateMasterBoostStatus() {
-    if (!statusMessage) {
-        console.error('statusMessage nie istnieje!');
-        return;
-    }
-
-    const rank = await getMasterBoostRank();
-    const stawka = await getStawkaReklamy(rank);
+    const rank = await getMyServerRank();
     const fullIp = `${SERVER_IP}:${SERVER_PORT}`;
     const now = new Date();
     const timePL = now.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Europe/Warsaw' });
     const datePL = now.toLocaleDateString('pl-PL', { day: 'numeric', month: 'numeric', year: 'numeric' });
 
-    const messageText = `MasterBoost - Aktualna pozycja w rankingu [${fullIp}]\n\nStawka Reklamy: ${stawka} | Pozycja: ${rank ? rank + '. miejsce' : 'NIE ZNALEZIONY'}\n\nAktualizacja: ${timePL}\n\n<@${USER_ID}> ${datePL}`;
+    const message = `MasterBoost - Aktualna pozycja w rankingu [${fullIp}]\n\nPozycja: ${rank ? rank + '. miejsce' : 'NIE ZNALEZIONY'}\n\nAktualizacja: ${timePL}\n\n@MCk199 ${datePL}`;
 
     try {
-        await statusMessage.edit({ content: messageText, embeds: [] });
-        console.log(`Wiadomość zaktualizowana – pozycja: ${rank || 'NIE'}, stawka: ${stawka}`);
+        await statusMessage.edit({ content: message, embeds: [] });
+        console.log(`Wiadomość zaktualizowana – TWOJA POZYCJA: ${rank || 'NIE ZNALEZIONY'}`);
     } catch (err) {
         console.error('Błąd edycji:', err);
     }
 }
 
-// READY – bez zmian
+// Ready
 client.once('ready', async () => {
-    console.log(`Bot ŻYJE jako ${client.user.tag} `);
+    console.log(`Bot ŻYJE jako ${client.user.tag}`);
 
     if (!TOKEN || !SERVER_IP || isNaN(SERVER_PORT) || !STATUS_CHANNEL_ID) {
-        console.error('BRAKUJE ZMIENNYCH ŚRODOWISKOWYCH!');
+        console.error('BRAKUJE ZMIENNYCH!');
         process.exit(1);
     }
 
@@ -155,22 +102,21 @@ client.once('ready', async () => {
 
     try {
         const channel = await client.channels.fetch(STATUS_CHANNEL_ID);
-        if (!channel || !(channel instanceof TextChannel)) throw new Error('Błędne ID kanału');
+        if (!channel) throw new Error('Błędne ID kanału');
 
         if (PREVIOUS_STATUS_MESSAGE_ID) {
             try {
                 statusMessage = await channel.messages.fetch(PREVIOUS_STATUS_MESSAGE_ID);
-                console.log('Załadano starą wiadomość');
             } catch {
-                statusMessage = await channel.send('Inicjuję MasterBoost...');
+                statusMessage = await channel.send('Inicjuję Zombie+EXP...');
             }
         } else {
-            statusMessage = await channel.send('Inicjuję MasterBoost...');
+            statusMessage = await channel.send('Inicjuję Zombie+EXP...');
         }
 
-        await updateMasterBoostStatus();
-        setInterval(updateMasterBoostStatus, UPDATE_INTERVAL_MINUTES * 60000);
-        console.log(`Interwał co ${UPDATE_INTERVAL_MINUTES} min włączony`);
+        await updateStatus();
+        setInterval(updateStatus, UPDATE_INTERVAL_MINUTES * 60000);
+        console.log(`Interwał co ${UPDATE_INTERVAL_MINUTES} min`);
     } catch (err) {
         console.error('Błąd startu:', err);
     }

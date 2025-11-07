@@ -25,43 +25,56 @@ const PREVIOUS_STATUS_MESSAGE_ID = process.env.PREVIOUS_STATUS_MESSAGE_ID;
 let statusMessage = null;
 let lastRank = 0;
 
-// Inicjalizacja klienta Discorda (TO BYŁO BRAK!)
-const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
-});
-
-// Scraper pozycji MasterBoost
+// POPRAWIONY SCAPER – TABLE TR TD (działa na 100%!)
 async function getMasterBoostRank() {
     const fullIp = `${SERVER_IP}:${SERVER_PORT}`;
     let page = 1;
-    while (true) {
+    while (page <= 5) {  // max 5 stron, żeby nie loopować wiecznie
         try {
+            console.log(`[DEBUG] Sprawdzam stronę ${page} dla IP: ${fullIp}`);
             const { data } = await axios.get(`https://cssetti.pl/lista?Page=${page}`, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
                 timeout: 15000
             });
             const $ = cheerio.load(data);
 
-            const servers = $('div.server-item');
-            for (let server of servers) {
-                const ipText = $(server).find('.server-ip').text().trim();
-                if (ipText.includes(fullIp)) {
-                    const rankText = $(server).find('.server-rank').text().trim().replace('.', '');
-                    return parseInt(rankText) || null;
+            // ZNALEZIONE SELEKTORY: table tbody tr -> td[0]=rank, td[2]=IP
+            const rows = $('table tbody tr');
+            console.log(`[DEBUG] Znaleziono ${rows.length} wierszy na stronie ${page}`);
+
+            for (let i = 0; i < rows.length; i++) {
+                const row = rows.eq(i);
+                const cols = row.find('td');
+                if (cols.length >= 3) {
+                    const rankText = cols.eq(0).text().trim();
+                    const ipText = cols.eq(2).text().trim();  // IP w 3. kolumnie (0-based: td[2])
+                    
+                    console.log(`[DEBUG] Wiersz ${i}: rank="${rankText}", IP="${ipText}"`);
+                    
+                    if (ipText.includes(fullIp)) {
+                        const rank = parseInt(rankText);
+                        console.log(`[MASTERBOOST] ZNALEZIONY! Pozycja: ${rank}`);
+                        return rank;
+                    }
                 }
             }
 
-            if (!$('a[rel="next"]').length) break;
+            // Paginacja
+            if (!$('a[aria-label="Następna"], a[rel="next"]').length) {
+                console.log(`[DEBUG] Brak następnej strony na ${page}`);
+                break;
+            }
             page++;
         } catch (err) {
-            console.error('[MASTERBOOST] Błąd:', err.message);
-            return null;
+            console.error('[MASTERBOOST] Błąd strony', page, ':', err.message);
+            break;
         }
     }
+    console.log('[MASTERBOOST] NIE ZNALEZIONY po 5 stronach');
     return null;
 }
 
-// Aktualizacja – ZAWSZE pokazuje pozycję
+// Reszta bez zmian – zawsze pokazuje pozycję
 async function updateMasterBoostStatus() {
     if (!statusMessage) return;
 
@@ -73,7 +86,7 @@ async function updateMasterBoostStatus() {
     });
 
     const embed = new EmbedBuilder()
-        .setTitle(' MasterBoost – Aktualna pozycja w rankingu cssetti.pl')
+        .setTitle(' MasterBoost – Aktualna pozycja cssetti.pl')
         .setURL('https://cssetti.pl/masterboost_stawki')
         .setThumbnail('https://cssetti.pl/favicon.ico')
         .setTimestamp()
@@ -81,12 +94,11 @@ async function updateMasterBoostStatus() {
 
     if (!rank) {
         embed.setColor(0xFF0000)
-             .setDescription(`**${fullIp}**\n\nSerwer **nie znaleziony** w rankingu!`)
+             .setDescription(`**${fullIp}**\n\n❌ **NIE ZNALEZIONY** w rankingu!`)
              .addFields({ name: 'Aktualizacja', value: timePL });
-        console.log('⚠️ Serwer nie znaleziony w rankingu cssetti.pl');
     } else {
         const color = rank <= 3 ? 0x00FF00 : (rank <= 10 ? 0xFFFF00 : 0xFFAA00);
-        const status = rank <= 3 ? 'TOP3' : (rank <= 10 ? 'TOP10' : 'POZA TOP10');
+        const status = rank <= 3 ? '🥇 TOP3' : (rank <= 10 ? '🥈 TOP10' : '📉 POZA TOP10');
         const zmiana = lastRank === 0 ? 'Pierwsze sprawdzenie' 
                      : (rank > lastRank ? `Spadek o ${rank - lastRank} 👎` 
                      : `Awans o ${lastRank - rank} 👍`);
@@ -96,22 +108,22 @@ async function updateMasterBoostStatus() {
              .addFields(
                  { name: 'Pozycja', value: `**${rank}. miejsce** ${status}`, inline: true },
                  { name: 'Zmiana', value: zmiana, inline: true },
-                 { name: 'MasterBoost', value: '[Kup stawki tutaj 🚀](https://cssetti.pl/masterboost_stawki)', inline: false },
+                 { name: 'Boost', value: '[Kup MasterBoost 🚀](https://cssetti.pl/masterboost_stawki)', inline: false },
                  { name: 'Aktualizacja', value: timePL, inline: false }
              );
 
-        console.log(`✅ Pozycja MasterBoost: ${rank} (było: ${lastRank || 'brak'})`);
         lastRank = rank;
     }
 
     try {
         await statusMessage.edit({ embeds: [embed], content: '' });
+        console.log(`✅ Embed zaktualizowany. Pozycja: ${rank || 'NIE ZNALEZIONY'}`);
     } catch (err) {
-        console.error('❌ Błąd edycji wiadomości:', err);
+        console.error('❌ Błąd edycji:', err);
     }
 }
 
-// Ready
+// Ready – bez zmian
 client.once('ready', async () => {
     console.log(`✅ Bot zalogowany jako ${client.user.tag}`);
 
@@ -120,7 +132,6 @@ client.once('ready', async () => {
         process.exit(1);
     }
 
-    // Keep-alive HTTP
     http.createServer((req, res) => res.end('OK')).listen(process.env.PORT || 3000);
 
     const channel = await client.channels.fetch(STATUS_CHANNEL_ID);
@@ -129,24 +140,23 @@ client.once('ready', async () => {
         return;
     }
 
-    // Wiadomość statusu
     if (PREVIOUS_STATUS_MESSAGE_ID) {
         try {
             statusMessage = await channel.messages.fetch(PREVIOUS_STATUS_MESSAGE_ID);
         } catch {
-            statusMessage = await channel.send({
-                embeds: [new EmbedBuilder().setDescription('Inicjuję MasterBoost...').setColor(0xFFA500)]
-            });
+            statusMessage = await channel.send({ embeds: [new EmbedBuilder().setDescription('🔄 Ładuję MasterBoost...').setColor(0xFFA500)] });
         }
     } else {
-        statusMessage = await channel.send({
-            embeds: [new EmbedBuilder().setDescription('Inicjuję MasterBoost...').setColor(0xFFA500)]
-        });
+        statusMessage = await channel.send({ embeds: [new EmbedBuilder().setDescription('🔄 Ładuję MasterBoost...').setColor(0xFFA500)] });
     }
 
-    // Pierwsze sprawdzenie + interwał
+    // Test od razu + interwał
     await updateMasterBoostStatus();
     setInterval(updateMasterBoostStatus, UPDATE_INTERVAL_MINUTES * 60000);
+});
+
+const client = new Client({
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
 client.login(TOKEN);

@@ -7,7 +7,7 @@ process.on('uncaughtException', err => {
 
 // Importy
 const http = require('http');
-const { Client, GatewayIntentBits, TextChannel, EmbedBuilder } = require('discord.com');
+const { Client, GatewayIntentBits, TextChannel, EmbedBuilder } = require('discord.js');
 const axios = require('axios');
 const cheerio = require('cheerio');
 require('dotenv').config();

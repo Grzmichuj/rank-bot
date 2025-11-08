@@ -27,51 +27,54 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
-// ================== SCRAPER – BARDZIEJ NIEZAWODNY ==================
-async function getOurRank() {
-    let page = 1;
-    while (page <= 20) {
-        try {
-            console.log(`[MASTERBOOST] Sprawdzam stronę ${page}...`);
-            const { data } = await axios.get(`https://cssetti.pl/masterboost_stawki?Page=${page}`, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-                timeout: 20000  // dłuższy timeout
-            });
-            const $ = cheerio.load(data);
-            const rows = $('table tbody tr');
+// ================== SCRAPER – BARDZIEJ NIEZAWODNY + RETRY ==================
+async function getOurRank(retries = 3) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        let page = 1;
+        while (page <= 20) {
+            try {
+                console.log(`[MASTERBOOST] Próba ${attempt} – sprawdzam stronę ${page}...`);
+                const { data } = await axios.get(`https://cssetti.pl/masterboost_stawki?Page=${page}`, {
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                    timeout: 45000  // 45 sekund – cssetti lubi wieszać
+                });
+                const $ = cheerio.load(data);
+                const rows = $('table tbody tr');
 
-            console.log(`[DEBUG] Znaleziono ${rows.length} wierszy na stronie ${page}`);
+                console.log(`[DEBUG] Znaleziono ${rows.length} wierszy na stronie ${page}`);
 
-            for (let i = 0; i < rows.length; i++) {
-                const cols = rows.eq(i).find('td');
-                if (cols.length < 4) continue;
+                for (let i = 0; i < rows.length; i++) {
+                    const cols = rows.eq(i).find('td');
+                    if (cols.length < 4) continue;
 
-                // Lepszy parsing pozycji – bierzemy surowy tekst i wyciągamy liczbę
-                const rankRaw = cols.eq(0).text().trim();
-                const rankMatch = rankRaw.match(/\d+/);  // tylko cyfry
-                const rank = rankMatch ? parseInt(rankMatch[0], 10) : null;
+                    const rankRaw = cols.eq(0).text().trim();
+                    const rankMatch = rankRaw.match(/\d+/);
+                    const rank = rankMatch ? parseInt(rankMatch[0], 10) : null;
 
-                const ipText = cols.eq(2).text().trim();
+                    const ipText = cols.eq(2).text().trim();
 
-                if (ipText.includes(FULL_IP)) {
-                    console.log(`[MASTERBOOST] ZNALEZIONO! Pozycja: ${rank} | Surowy rank: "${rankRaw}" | IP: ${ipText}`);
-                    return rank;
+                    if (ipText.includes(FULL_IP)) {
+                        console.log(`[MASTERBOOST] ZNALEZIONO! Pozycja: ${rank} | Surowy rank: "${rankRaw}" | IP: ${ipText}`);
+                        return rank;
+                    }
                 }
-            }
 
-            // paginacja
-            const nextBtn = $('a[aria-label="Następna"], a[rel="next"]');
-            if (!nextBtn.length || nextBtn.parent().hasClass('disabled')) {
-                console.log('[MASTERBOOST] Ostatnia strona.');
-                break;
+                const nextBtn = $('a[aria-label="Następna"], a[rel="next"]');
+                if (!nextBtn.length || nextBtn.parent().hasClass('disabled')) {
+                    console.log('[MASTERBOOST] Ostatnia strona.');
+                    break;
+                }
+                page++;
+            } catch (err) {
+                console.error(`[MASTERBOOST] Błąd na stronie ${page} (próba ${attempt}):`, err.message);
+                if (attempt === retries) {
+                    return null; // po ostatniej próbie oddaj null
+                }
+                await new Promise(res => setTimeout(res, 5000)); // 5 s przerwy przed retry
             }
-            page++;
-        } catch (err) {
-            console.error(`[MASTERBOOST] Błąd na stronie ${page}:`, err.message);
-            break;
         }
     }
-    console.log('[MASTERBOOST] SERWER NIE ZNALEZIONY');
+    console.log('[MASTERBOOST] SERWER NIE ZNALEZIONY po wszystkich próbach');
     return null;
 }
 
@@ -128,7 +131,14 @@ client.once('ready', async () => {
         process.exit(1);
     }
 
-    http.createServer((req, res) => res.end('OK')).listen(process.env.PORT || 3000);
+    // HEALTH-CHECK DLA RENDER.COM / VERCEL / HEROKU
+    const PORT = process.env.PORT || 3000;
+    http.createServer((req, res) => {
+        res.writeHead(200);
+        res.end('OK');
+    }).listen(PORT, '0.0.0.0', () => {
+        console.log(`Health-check serwer nasłuchuje na http://0.0.0.0:${PORT}`);
+    });
 
     try {
         const channel = await client.channels.fetch(STATUS_CHANNEL_ID);

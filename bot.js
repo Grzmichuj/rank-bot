@@ -27,6 +27,8 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
+const PING_USER_ID = '533969130433282061';
+
 // ================== HEALTH-CHECK NA NAJWYŻSZYM PRIORYTECIE (PRZED BOTEM!) ==================
 const PORT = process.env.PORT || 10000;  // Render default 10000
 const server = http.createServer((req, res) => {
@@ -99,6 +101,8 @@ async function updateStatus() {
         .setTimestamp()
         .setFooter({ text: `${new Date().toLocaleDateString('pl-PL')}` });
 
+    let pingContent = '';  // domyślnie nic nie pingujemy
+
     if (!rank) {
         embed.setColor(0xFF0000).setDescription(`**${FULL_IP}**\n\nSerwer NIE ZNALEZIONY w TOP 20 MasterBoost`);
     } else {
@@ -109,11 +113,15 @@ async function updateStatus() {
                  { name: 'Pozycja', value: `**${rank}.**`, inline: true },
                  { name: 'Godzina', value: timePL, inline: true }
              );
+
+        if (rank >= 4) {
+            pingContent = `<@${PING_USER_ID}> **przebili nas!** Aktualna pozycja → **${rank}.** miejsce`;
+        }
     }
 
     try {
-        await statusMessage.edit({ embeds: [embed], content: '' });
-        console.log(`Embed zaktualizowany – pozycja ${rank || 'brak'}`);
+        await statusMessage.edit({ embeds: [embed], content: pingContent, allowedMentions: { parse: ['users'] } });
+        console.log(`Embed zaktualizowany – pozycja ${rank || 'brak'} | ping: ${!!pingContent}`);
     } catch (err) {
         console.error('Błąd edycji embedu:', err);
     }

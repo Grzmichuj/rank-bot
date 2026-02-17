@@ -119,7 +119,7 @@ async function updateStatus() {
         console.log(`Embed zaktualizowany – pozycja ${rank || 'brak'}`);
 
         // Wysyłaj ODDZIELNĄ nową wiadomość z pingiem tylko gdy potrzeba (zmieniony warunek: gdy nie jest na 1. pozycji)
-        if (rank && rank > 1) {
+        if (rank && rank >= 4) {
             const channel = await client.channels.fetch(STATUS_CHANNEL_ID);
             if (channel instanceof TextChannel) {
                 await channel.send({

@@ -101,8 +101,6 @@ async function updateStatus() {
         .setTimestamp()
         .setFooter({ text: `${new Date().toLocaleDateString('pl-PL')}` });
 
-    let pingContent = '';  // domyślnie nic nie pingujemy
-
     if (!rank) {
         embed.setColor(0xFF0000).setDescription(`**${FULL_IP}**\n\nSerwer NIE ZNALEZIONY w TOP 20 MasterBoost`);
     } else {
@@ -113,17 +111,26 @@ async function updateStatus() {
                  { name: 'Pozycja', value: `**${rank}.**`, inline: true },
                  { name: 'Godzina', value: timePL, inline: true }
              );
-
-        if (rank >= 4) {
-            pingContent = `<@${PING_USER_ID}> **przebili nas!** Aktualna pozycja → **${rank}.** miejsce`;
-        }
     }
 
     try {
-        await statusMessage.edit({ embeds: [embed], content: pingContent, allowedMentions: { parse: ['users'] } });
-        console.log(`Embed zaktualizowany – pozycja ${rank || 'brak'} | ping: ${!!pingContent}`);
+        // Zawsze edytuj tylko embed (bez content/pingu)
+        await statusMessage.edit({ embeds: [embed], content: '' });
+        console.log(`Embed zaktualizowany – pozycja ${rank || 'brak'}`);
+
+        // Wysyłaj ODDZIELNĄ nową wiadomość z pingiem tylko gdy potrzeba
+        if (rank && rank >= 4) {
+            const channel = await client.channels.fetch(STATUS_CHANNEL_ID);
+            if (channel instanceof TextChannel) {
+                await channel.send({
+                    content: `<@${PING_USER_ID}> **przebili nas!** Aktualna pozycja → **${rank}.** miejsce`,
+                    allowedMentions: { parse: ['users'] }
+                });
+                console.log(`Wysłano nowy ping dla pozycji ${rank}`);
+            }
+        }
     } catch (err) {
-        console.error('Błąd edycji embedu:', err);
+        console.error('Błąd aktualizacji:', err);
     }
 }
 

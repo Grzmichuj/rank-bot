@@ -118,12 +118,12 @@ async function updateStatus() {
         await statusMessage.edit({ embeds: [embed], content: '' });
         console.log(`Embed zaktualizowany – pozycja ${rank || 'brak'}`);
 
-        // Wysyłaj ODDZIELNĄ nową wiadomość z pingiem tylko gdy potrzeba
-        if (rank && rank >= 1) {
+        // Wysyłaj ODDZIELNĄ nową wiadomość z pingiem tylko gdy potrzeba (zmieniony warunek: gdy nie jest na 1. pozycji)
+        if (rank && rank > 1) {
             const channel = await client.channels.fetch(STATUS_CHANNEL_ID);
             if (channel instanceof TextChannel) {
                 await channel.send({
-                    content: `<@${PING_USER_ID}> **przebili nas!** Aktualna pozycja → **${rank}.** miejsce`,
+                    content: `<@${PING_USER_ID}> **nie jesteśmy na 1. miejscu!** Aktualna pozycja → **${rank}.** miejsce`,
                     allowedMentions: { parse: ['users'] }
                 });
                 console.log(`Wysłano nowy ping dla pozycji ${rank}`);
